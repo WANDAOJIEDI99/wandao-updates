@@ -6,12 +6,19 @@
    "file": "patch-2.149.0_2.149.1.zip",
    "size": 512,
    "sha256": "860f97e22d6e394e13b17dfb6eef5c6ef47bf0558d76e41d188edba2d650b4c7"
+  },
+  {
+   "from": "2.149.1",
+   "to": "2.150.0",
+   "file": "patch-2.149.1_2.150.0.zip",
+   "size": 17589,
+   "sha256": "4db47443d0480a78cc35d7738712c4559f0ce44fb80c24b9f9ff12450a1a9d87"
   }
  ],
- "version": "2.149.1",
- "released_at": "2026-11-17T16:23:21Z",
- "shell_changed": false,
- "notes": "self-test: 验证增量更新链路",
+ "version": "2.150.0",
+ "released_at": "2026-11-17T23:44:59Z",
+ "shell_changed": true,
+ "notes": "壳内检查更新上线（设置→关于→版本与更新）；shim 直通 /api/update/*",
  "package": {
   "version": "",
   "name": "",
