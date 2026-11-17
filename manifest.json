@@ -1,9 +1,17 @@
 {
- "patches": [],
- "version": "2.149.0",
- "released_at": "2026-11-17T16:22:57Z",
+ "patches": [
+  {
+   "from": "2.149.0",
+   "to": "2.149.1",
+   "file": "patch-2.149.0_2.149.1.zip",
+   "size": 512,
+   "sha256": "860f97e22d6e394e13b17dfb6eef5c6ef47bf0558d76e41d188edba2d650b4c7"
+  }
+ ],
+ "version": "2.149.1",
+ "released_at": "2026-11-17T16:23:21Z",
  "shell_changed": false,
- "notes": "baseline: 首次发布更新通道",
+ "notes": "self-test: 验证增量更新链路",
  "package": {
   "version": "",
   "name": "",
