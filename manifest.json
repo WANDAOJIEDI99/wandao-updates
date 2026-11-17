@@ -1,0 +1,14 @@
+{
+ "patches": [],
+ "version": "2.149.0",
+ "released_at": "2026-11-17T16:22:57Z",
+ "shell_changed": false,
+ "notes": "baseline: 首次发布更新通道",
+ "package": {
+  "version": "",
+  "name": "",
+  "size": 0,
+  "sha256": "",
+  "path": ""
+ }
+}
