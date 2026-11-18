@@ -115,29 +115,55 @@ function Invoke-Stage([string]$name) {
     'download' {
       $payload = Get-Payload
       $target = Join-Path $env:TEMP ("wandao-" + $payload.version + ".7z")
-      Write-Log "downloading $($payload.version) -> $target"
-      $ok = $false
-      $errors = @()
-      foreach ($url in @($payload.mirrors)) {
-        try {
-          Write-Log "GET $url"
-          Invoke-WebRequest -Uri $url -OutFile $target -UseBasicParsing -TimeoutSec 3600
-          if ((Get-Item $target).Length -gt 0) { $ok = $true; break }
-        } catch {
-          $errors += "$url -> $($_.Exception.Message)"
+      $want = [int64]$payload.bytes
+      $wantSha = [string]$payload.sha256
+      $mirrors = @($payload.mirrors)
+
+      $complete = $false
+      if (Test-Path $target) {
+        $have = (Get-Item $target).Length
+        if ($have -eq $want) { $complete = $true }
+        else { Write-Log ("已有不完整文件 {0:N0} B / 期望 {1:N0} B，尝试续传" -f $have, $want) }
+      }
+
+      # 优先用系统自带 curl.exe：支持断点续传(-C -)与重试，Invoke-WebRequest 会静默截断
+      $curl = Join-Path $env:SystemRoot 'System32\curl.exe'
+      if (-not (Test-Path $curl)) { $curl = $null }
+
+      for ($attempt = 1; $attempt -le 3 -and -not $complete; $attempt++) {
+        foreach ($url in $mirrors) {
+          Write-Log ("下载第 {0} 轮: {1}" -f $attempt, $url)
+          try {
+            if ($curl) {
+              & $curl -L --fail --retry 3 --retry-delay 3 --continue-at - --max-time 7200 --speed-time 120 --speed-limit 1024 -o $target $url
+            } else {
+              Invoke-WebRequest -Uri $url -OutFile $target -UseBasicParsing -TimeoutSec 7200
+            }
+          } catch {
+            Write-Log ("本轮失败: " + $_.Exception.Message)
+          }
+          if (Test-Path $target) {
+            $have = (Get-Item $target).Length
+            Write-Log ("当前 {0:N0} B / 期望 {1:N0} B" -f $have, $want)
+            if ($have -eq $want) { $complete = $true; break }
+          }
         }
       }
-      if (-not $ok) { Emit $name $false ("全部下载源失败: " + ($errors -join ' | ')); return 1 }
-      $sizeMb = [math]::Round((Get-Item $target).Length / 1MB, 1)
-      if ($payload.sha256) {
+
+      if (-not $complete) {
+        Emit $name $false ("下载未完成：得到 {0:N0} B，期望 {1:N0} B" -f ((Get-Item $target -ErrorAction SilentlyContinue).Length), $want)
+        return 1
+      }
+
+      if ($wantSha) {
         $actual = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLower()
-        if ($actual -ne $payload.sha256.ToLower()) {
-          Emit $name $false "sha256 不匹配: 期望 $($payload.sha256) 实际 $actual"
+        if ($actual -ne $wantSha.ToLower()) {
+          Emit $name $false "sha256 不匹配: 期望 $wantSha 实际 $actual"
           return 1
         }
       }
       $env:WANDAO_PKG_PATH = $target
-      Emit $name $true "$target ($sizeMb MB) sha256 ok"
+      Emit $name $true ("{0} ({1:N1} MB) sha256 ok" -f $target, ((Get-Item $target).Length / 1MB))
       return 0
     }
     'extract' {
