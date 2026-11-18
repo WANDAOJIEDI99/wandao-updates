@@ -122,8 +122,14 @@ function Invoke-Stage([string]$name) {
       $complete = $false
       if (Test-Path $target) {
         $have = (Get-Item $target).Length
-        if ($have -eq $want) { $complete = $true }
-        else { Write-Log ("已有不完整文件 {0:N0} B / 期望 {1:N0} B，尝试续传" -f $have, $want) }
+        if ($have -eq $want) {
+          $complete = $true
+        } elseif ($have -gt 0) {
+          # 🔴 2026-11-18 实测踩到：TEMP 里留着**上一版**同名文件时，-C - 会把新包的
+          #    字节续到旧文件尾巴上，最后大小对不上、sha 必错。尺寸不一致就别续传。
+          Write-Log ("已有文件 {0:N0} B ≠ 期望 {1:N0} B，删除后重新下载" -f $have, $want)
+          Remove-Item $target -Force -ErrorAction SilentlyContinue
+        }
       }
 
       # 优先用系统自带 curl.exe：支持断点续传(-C -)与重试，Invoke-WebRequest 会静默截断
@@ -158,6 +164,8 @@ function Invoke-Stage([string]$name) {
       if ($wantSha) {
         $actual = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLower()
         if ($actual -ne $wantSha.ToLower()) {
+          Write-Log "sha256 不匹配，删除本地文件避免下次续传坏包"
+          Remove-Item $target -Force -ErrorAction SilentlyContinue
           Emit $name $false "sha256 不匹配: 期望 $wantSha 实际 $actual"
           return 1
         }
