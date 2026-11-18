@@ -19,6 +19,8 @@ $ErrorActionPreference = 'Stop'
 # 强制 UTF-8 输出（PS 5.1 默认按 GBK 写管道，中文阶段标题会变乱码）
 try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { }
 try { $OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { }
+# PS 5.1 默认可能用 TLS1.0，下载 GitHub Release 大文件会失败
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
 
 $Repo = if ($env:WANDAO_INSTALL_REPO) { $env:WANDAO_INSTALL_REPO } else { 'WANDAOJIEDI99/wandao-updates' }
 $Ref = if ($Branch) { $Branch } elseif ($env:WANDAO_INSTALL_REF) { $env:WANDAO_INSTALL_REF } else { 'main' }
