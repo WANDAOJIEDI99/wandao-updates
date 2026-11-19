@@ -87,7 +87,7 @@ function Get-SevenZip {
 
 $Stages = @(
   [ordered]@{ name = 'prepare';  title = '检查环境与磁盘空间';       category = 'preflight'; needs_user_input = $false },
-  [ordered]@{ name = 'download'; title = '下载万道工作台安装包';     category = 'download';  needs_user_input = $false },
+  [ordered]@{ name = 'download'; title = '下载万道内核';               category = 'download';  needs_user_input = $false },
   [ordered]@{ name = 'extract';  title = '解压到目标目录';           category = 'extract';   needs_user_input = $false },
   [ordered]@{ name = 'finalize'; title = '写入版本信息并完成安装';   category = 'finalize';  needs_user_input = $false }
 )
@@ -115,63 +115,29 @@ function Invoke-Stage([string]$name) {
     'download' {
       $payload = Get-Payload
       $target = Join-Path $env:TEMP ("wandao-" + $payload.version + ".7z")
-      $want = [int64]$payload.bytes
-      $wantSha = [string]$payload.sha256
-      $mirrors = @($payload.mirrors)
-
-      $complete = $false
-      if (Test-Path $target) {
-        $have = (Get-Item $target).Length
-        if ($have -eq $want) {
-          $complete = $true
-        } elseif ($have -gt 0) {
-          # 🔴 2026-11-18 实测踩到：TEMP 里留着**上一版**同名文件时，-C - 会把新包的
-          #    字节续到旧文件尾巴上，最后大小对不上、sha 必错。尺寸不一致就别续传。
-          Write-Log ("已有文件 {0:N0} B ≠ 期望 {1:N0} B，删除后重新下载" -f $have, $want)
-          Remove-Item $target -Force -ErrorAction SilentlyContinue
+      Write-Log "downloading $($payload.version) -> $target"
+      $ok = $false
+      $errors = @()
+      foreach ($url in @($payload.mirrors)) {
+        try {
+          Write-Log "GET $url"
+          Invoke-WebRequest -Uri $url -OutFile $target -UseBasicParsing -TimeoutSec 3600
+          if ((Get-Item $target).Length -gt 0) { $ok = $true; break }
+        } catch {
+          $errors += "$url -> $($_.Exception.Message)"
         }
       }
-
-      # 优先用系统自带 curl.exe：支持断点续传(-C -)与重试，Invoke-WebRequest 会静默截断
-      $curl = Join-Path $env:SystemRoot 'System32\curl.exe'
-      if (-not (Test-Path $curl)) { $curl = $null }
-
-      for ($attempt = 1; $attempt -le 3 -and -not $complete; $attempt++) {
-        foreach ($url in $mirrors) {
-          Write-Log ("下载第 {0} 轮: {1}" -f $attempt, $url)
-          try {
-            if ($curl) {
-              & $curl -L --fail --retry 3 --retry-delay 3 --continue-at - --max-time 7200 --speed-time 120 --speed-limit 1024 -o $target $url
-            } else {
-              Invoke-WebRequest -Uri $url -OutFile $target -UseBasicParsing -TimeoutSec 7200
-            }
-          } catch {
-            Write-Log ("本轮失败: " + $_.Exception.Message)
-          }
-          if (Test-Path $target) {
-            $have = (Get-Item $target).Length
-            Write-Log ("当前 {0:N0} B / 期望 {1:N0} B" -f $have, $want)
-            if ($have -eq $want) { $complete = $true; break }
-          }
-        }
-      }
-
-      if (-not $complete) {
-        Emit $name $false ("下载未完成：得到 {0:N0} B，期望 {1:N0} B" -f ((Get-Item $target -ErrorAction SilentlyContinue).Length), $want)
-        return 1
-      }
-
-      if ($wantSha) {
+      if (-not $ok) { Emit $name $false ("全部下载源失败: " + ($errors -join ' | ')); return 1 }
+      $sizeMb = [math]::Round((Get-Item $target).Length / 1MB, 1)
+      if ($payload.sha256) {
         $actual = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLower()
-        if ($actual -ne $wantSha.ToLower()) {
-          Write-Log "sha256 不匹配，删除本地文件避免下次续传坏包"
-          Remove-Item $target -Force -ErrorAction SilentlyContinue
-          Emit $name $false "sha256 不匹配: 期望 $wantSha 实际 $actual"
+        if ($actual -ne $payload.sha256.ToLower()) {
+          Emit $name $false "sha256 不匹配: 期望 $($payload.sha256) 实际 $actual"
           return 1
         }
       }
       $env:WANDAO_PKG_PATH = $target
-      Emit $name $true ("{0} ({1:N1} MB) sha256 ok" -f $target, ((Get-Item $target).Length / 1MB))
+      Emit $name $true "$target ($sizeMb MB) sha256 ok"
       return 0
     }
     'extract' {
@@ -182,10 +148,20 @@ function Invoke-Stage([string]$name) {
       }
       if (-not (Test-Path $pkg)) { Emit $name $false "安装包不存在: $pkg"; return 1 }
       $sevenZip = Get-SevenZip
-      $parent = Split-Path -Parent $InstallDir
-      Write-Log "extract $pkg -> $parent"
-      & $sevenZip x $pkg "-o$parent" -y -bsp0 -bso0 | Out-Null
+      # 2026-11-19：解压到临时目录再搬进 InstallDir —— 包内顶层可能有 WandaoHermes 外壳目录，
+      # 也可能直接是 kernel/tools（无壳），两种都要落到用户选定的安装根。
+      $tmpDir = Join-Path $env:TEMP ("wandao-x-" + [guid]::NewGuid().ToString('N'))
+      New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+      Write-Log "extract $pkg -> $tmpDir"
+      & $sevenZip x $pkg "-o$tmpDir" -y -bsp0 -bso0 | Out-Null
       if ($LASTEXITCODE -ne 0) { Emit $name $false "7z 退出码 $LASTEXITCODE"; return 1 }
+      $srcRoot = $tmpDir
+      $wrapped = Join-Path $tmpDir 'WandaoHermes'
+      if (Test-Path (Join-Path $wrapped 'start-wandao.bat')) { $srcRoot = $wrapped }
+      if (-not (Test-Path $InstallDir)) { New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null }
+      Write-Log "move $srcRoot\* -> $InstallDir"
+      Copy-Item -Path (Join-Path $srcRoot '*') -Destination $InstallDir -Recurse -Force
+      Remove-Item -Path $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
       if (-not (Test-Path (Join-Path $InstallDir 'start-wandao.bat'))) {
         Emit $name $false "解压后未找到 $InstallDir\start-wandao.bat"
         return 1
