@@ -1,11 +1,11 @@
 {
-  "version": "20261118",
-  "file": "WandaoHermes-share-20261118.7z",
-  "bytes": 2045661869,
-  "required_bytes": 4500456111,
-  "sha256": "3de5964b22ade9582039ae1e2006fad1af2ef6cf0fe377fa6cdb60a88741b6d2",
+  "version": "20261119",
+  "file": "WandaoHermes-share-20261119.7z",
+  "bytes": 2049782448,
+  "required_bytes": 9000000000,
+  "sha256": "34ce8fd710d267e62512ba92915daeb81bb522ba30e277ab127559cce4f5eb72",
   "mirrors": [
-    "https://github.com/WANDAOJIEDI99/wandao-updates/releases/download/v20261118/WandaoHermes-share-20261118.7z",
-    "https://ghproxy.net/https://github.com/WANDAOJIEDI99/wandao-updates/releases/download/v20261118/WandaoHermes-share-20261118.7z"
+    "https://github.com/WANDAOJIEDI99/wandao-updates/releases/download/v20261119/WandaoHermes-share-20261119.7z",
+    "https://ghproxy.net/https://github.com/WANDAOJIEDI99/wandao-updates/releases/download/v20261119/WandaoHermes-share-20261119.7z"
   ]
 }
