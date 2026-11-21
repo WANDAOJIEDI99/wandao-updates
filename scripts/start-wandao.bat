@@ -98,11 +98,13 @@ echo If the desktop app shows no reply, check: %LOGS%\kernel-boot.log
 
 echo.
 
-if exist "%ROOT%\shell\app\electron.exe" (
-  echo Opening desktop shell ...
+REM bundled shell only starts when its deps exist (missing node_modules -> node-pty error)
+if exist "%ROOT%\shell\app\electron.exe" if exist "%ROOT%\shell\app\node_modules\node-pty" (
+  echo Opening bundled desktop shell ...
   start "" "%ROOT%\shell\app\electron.exe" "%ROOT%\shell\app" --remote-debugging-port=9333
 ) else (
-  echo Desktop shell not bundled here - open the installed WandaoHermes app.
+  echo.
+  echo Kernel is up. Open the WandaoHermes desktop app from Start Menu / desktop shortcut.
 )
 
 
