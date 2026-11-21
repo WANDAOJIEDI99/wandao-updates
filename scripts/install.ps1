@@ -192,6 +192,8 @@ function Invoke-Stage([string]$name) {
         }
       }
       $sizeMb = [math]::Round((Get-Item $target).Length / 1MB, 1)
+      # 关键：把解析到的包路径落盘，extract 阶段（可能是另一个进程）靠它找包
+      try { Set-Content -Path (Join-Path $env:TEMP 'wandao-pkg-path.txt') -Value $target -Encoding UTF8 } catch { }
       if ($payload.sha256) {
         $actual = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLower()
         if ($actual -ne $payload.sha256.ToLower()) {
@@ -206,10 +208,17 @@ function Invoke-Stage([string]$name) {
     'extract' {
       $pkg = $env:WANDAO_PKG_PATH
       if (-not $pkg) {
-        $payload = Get-Payload
-        $pkg = Join-Path $env:TEMP ("wandao-" + $payload.version + ".7z")
+        $pathFile = Join-Path $env:TEMP 'wandao-pkg-path.txt'
+        if (Test-Path $pathFile) { $pkg = (Get-Content $pathFile -Raw).Trim() }
       }
-      if (-not (Test-Path $pkg)) { Emit $name $false "安装包不存在: $pkg"; return 1 }
+      if (-not $pkg -or -not (Test-Path $pkg)) {
+        $payload = Get-Payload
+        $cands = @(Join-Path $env:TEMP ("wandao-" + $payload.version + ".7z"))
+        $cands += (Get-ChildItem -Path $env:TEMP -Filter ("wandao-" + $payload.version + "*.7z") -File -ErrorAction SilentlyContinue |
+                   ForEach-Object { $_.FullName })
+        $pkg = $cands | Where-Object { Test-Path $_ } | Select-Object -First 1
+      }
+      if (-not $pkg -or -not (Test-Path $pkg)) { Emit $name $false "安装包不存在（download 阶段没能落到本地，或临时目录被清空）"; return 1 }
       $sevenZip = Get-SevenZip
       # 2026-11-19：解压到临时目录再搬进 InstallDir —— 包内顶层可能有 WandaoHermes 外壳目录，
       # 也可能直接是 kernel/tools（无壳），两种都要落到用户选定的安装根。
