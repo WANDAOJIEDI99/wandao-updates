@@ -1,14 +1,14 @@
 {
-  "version": "20261121b",
+  "version": "20261121c",
   "kind": "kernel",
-  "file": "WandaoHermes-kernel-20261121b.7z",
-  "bytes": 569079502,
-  "required_bytes": 6000000000,
-  "sha256": "9f2f9da15fd731366488b0bc52ae63a2801e4de8878296702d7744a7fe09591d",
+  "file": "WandaoHermes-kernel-20261121c.7z",
+  "bytes": 427258025,
+  "required_bytes": 5000000000,
+  "sha256": "cff2ca94b67822389653825772c9d074abf5090e1ef8c841c4b29f2b221370f5",
   "mirrors": [
-    "https://github.com/WANDAOJIEDI99/wandao-updates/releases/download/v20261121b/WandaoHermes-kernel-20261121b.7z",
-    "https://ghproxy.net/https://github.com/WANDAOJIEDI99/wandao-updates/releases/download/v20261121b/WandaoHermes-kernel-20261121b.7z",
-    "https://gh-proxy.com/https://github.com/WANDAOJIEDI99/wandao-updates/releases/download/v20261121b/WandaoHermes-kernel-20261121b.7z",
-    "https://ghfast.top/https://github.com/WANDAOJIEDI99/wandao-updates/releases/download/v20261121b/WandaoHermes-kernel-20261121b.7z"
+    "https://github.com/WANDAOJIEDI99/wandao-updates/releases/download/v20261121b/WandaoHermes-kernel-20261121c.7z",
+    "https://ghproxy.net/https://github.com/WANDAOJIEDI99/wandao-updates/releases/download/v20261121b/WandaoHermes-kernel-20261121c.7z",
+    "https://gh-proxy.com/https://github.com/WANDAOJIEDI99/wandao-updates/releases/download/v20261121b/WandaoHermes-kernel-20261121c.7z",
+    "https://ghfast.top/https://github.com/WANDAOJIEDI99/wandao-updates/releases/download/v20261121b/WandaoHermes-kernel-20261121c.7z"
   ]
 }
