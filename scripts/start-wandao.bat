@@ -6,6 +6,14 @@ REM  non-ASCII inside .bat turns into mojibake.
 REM ============================================================
 setlocal
 set "ROOT=%~dp0"
+
+if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
+
+if not exist "%ROOT%\logs" mkdir "%ROOT%\logs"
+
+set "LAUNCHLOG=%ROOT%\logs\launcher.log"
+
+echo [%DATE% %TIME%] launcher start ROOT=%ROOT% >> "%LAUNCHLOG%"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 set "KERNEL=%ROOT%\kernel\run"
 set "TOOLS=%ROOT%\tools"
@@ -71,7 +79,7 @@ if errorlevel 1 start "" /b "%PY%" -X utf8 -u "%KERNEL%\hub_server.py" >> "%LOGS
 echo [3/3] weixin bridge + proactive
 netstat -ano | findstr /r /c:"127.0.0.1:42202 .*LISTENING" >nul 2>&1
 if errorlevel 1 start "" /b "%PY%" -X utf8 -u "%KERNEL%\weixin_bridge.py" >> "%LOGS%\weixin-bridge.log" 2>&1
-wmic process where "name like '%python%'" get commandline 2>nul | findstr /i /c:"proactive.py" >nul
+powershell -NoProfile -Command "if (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*proactive.py*' }) { exit 0 } else { exit 1 }" >nul 2>&1
 if errorlevel 1 start "" /b "%PY%" -X utf8 -u "%KERNEL%\proactive.py" >> "%LOGS%\proactive.log" 2>&1
 
 REM optional: local postgres (only when the package carries it)
@@ -82,8 +90,13 @@ if exist "%PGBIN%\pg_ctl.exe" (
 )
 
 echo.
-echo Kernel started. Waiting for 42200 ...
-powershell -NoProfile -Command "$ok=$false; for($i=0;$i -lt 40;$i++){ try{ $r=Invoke-WebRequest -Uri 'http://127.0.0.1:42200/api/health' -UseBasicParsing -TimeoutSec 2; if($r.StatusCode -eq 200){$ok=$true;break} }catch{}; Start-Sleep -Milliseconds 500 }; if($ok){'kernel OK'}else{'kernel NOT answering - see logs\kernel-boot.log'}"
+echo.
+
+echo Kernel is starting on 127.0.0.1:42200 .
+
+echo If the desktop app shows no reply, check: %LOGS%\kernel-boot.log
+
+echo.
 
 if exist "%ROOT%\shell\app\electron.exe" (
   echo Opening desktop shell ...
@@ -92,4 +105,11 @@ if exist "%ROOT%\shell\app\electron.exe" (
   echo Desktop shell not bundled here - open the installed WandaoHermes app.
 )
 
-endlocal
+
+
+echo.
+
+echo Done. Press any key to close this window.
+
+pause >nul
+
