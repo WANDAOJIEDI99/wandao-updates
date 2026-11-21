@@ -266,18 +266,31 @@ function Invoke-Stage([string]$name) {
       if (-not (Test-Path $rootBat)) {
         $kbat = Join-Path $InstallDir 'kernel\start.bat'
         if (Test-Path $kbat) {
-          $batLines = @(
-            '@echo off',
-            'setlocal',
-            'set "ROOT=%~dp0"',
-            'if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"',
-            'set "WANDAO_ROOT=%ROOT%"',
-            'set "WANDAO_HOME=%ROOT%\data\_wandao"',
-            'set "WANDAO_GW=http://127.0.0.1:42200"',
-            'set "WANDAO_SINGLE_SESSION=1"',
-            'call "%ROOT%\kernel\start.bat" %*'
-          )
-          try { Set-Content -Path $rootBat -Value ($batLines -join "`r`n") -Encoding ASCII -Force } catch { }
+          # 优先从仓库取正确的启动器（含 kernel/hub/weixin/proactive + 健康检查）
+          $fetched = $false
+          try {
+            Get-RemoteFile 'scripts/start-wandao.bat' $rootBat | Out-Null
+            if ((Test-Path $rootBat) -and ((Get-Item $rootBat).Length -gt 500)) { $fetched = $true }
+          } catch { Write-Log "start-wandao.bat 下载失败: $($_.Exception.Message)" }
+          if (-not $fetched) {
+            # 兜底：直接拉起 chat_server（不要再调 kernel\start.bat，那是旧脚手架）
+            $batLines = @(
+              '@echo off',
+              'setlocal',
+              'set "ROOT=%~dp0"',
+              'if "%ROOT:~-1%"=="\\" set "ROOT=%ROOT:~0,-1%"',
+              'set "WANDAO_ROOT=%ROOT%"',
+              'set "WANDAO_HOME=%ROOT%\data\_wandao"',
+              'set "WANDAO_GW=http://127.0.0.1:42200"',
+              'set "WANDAO_GW_NO_AUTH=1"',
+              'set "WANDAO_SINGLE_SESSION=1"',
+              'if not exist "%ROOT%\logs" mkdir "%ROOT%\logs"',
+              'if not exist "%ROOT%\data\_wandao" mkdir "%ROOT%\data\_wandao"',
+              'start "" /b "%ROOT%\tools\python\pythonw.exe" -X utf8 -u "%ROOT%\kernel\run\chat_server.py" --task-approve-writes >> "%ROOT%\logs\kernel-boot.log" 2>&1',
+              'echo kernel starting on 127.0.0.1:42200'
+            )
+            try { Set-Content -Path $rootBat -Value ($batLines -join "`r`n") -Encoding ASCII -Force } catch { }
+          }
         }
       }
       Emit $name $true "$InstallDir 已就绪"
