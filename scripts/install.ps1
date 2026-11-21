@@ -70,6 +70,37 @@ function Get-Payload {
   return (Get-Content $payloadFile -Raw -Encoding UTF8 | ConvertFrom-Json)
 }
 
+function Find-LocalPackage($payload) {
+  # 依次在这些位置找 WandaoHermes-kernel-*.7z，sha256 对得上才算数
+  $dirs = @()
+  if ($env:WANDAO_LOCAL_PKG) {
+    if (Test-Path $env:WANDAO_LOCAL_PKG) { return $env:WANDAO_LOCAL_PKG }
+  }
+  $dirs += @(
+    (Join-Path $env:USERPROFILE 'Downloads'),
+    'D:\WandaoHermes_share_build',
+    'D:\WandaoHermes',
+    'C:\WandaoHermes_share_build',
+    $env:TEMP
+  )
+  foreach ($d in $dirs) {
+    if (-not (Test-Path $d)) { continue }
+    $files = Get-ChildItem -Path $d -Filter 'WandaoHermes-kernel-*.7z' -File -ErrorAction SilentlyContinue |
+             Sort-Object LastWriteTime -Descending
+    foreach ($f in $files) {
+      if ($payload.bytes -and $f.Length -ne [int64]$payload.bytes) { continue }
+      if ($payload.sha256) {
+        try {
+          $h = (Get-FileHash -Path $f.FullName -Algorithm SHA256).Hash.ToLower()
+          if ($h -ne $payload.sha256.ToLower()) { continue }
+        } catch { continue }
+      }
+      return $f.FullName
+    }
+  }
+  return $null
+}
+
 function Get-SevenZip {
   $candidates = @(
     'D:\7-Zip\7z.exe',
@@ -114,20 +145,46 @@ function Invoke-Stage([string]$name) {
     }
     'download' {
       $payload = Get-Payload
-      $target = Join-Path $env:TEMP ("wandao-" + $payload.version + ".7z")
-      Write-Log "downloading $($payload.version) -> $target"
+      $sizeMb = 0
       $ok = $false
       $errors = @()
-      foreach ($url in @($payload.mirrors)) {
-        try {
-          Write-Log "GET $url"
-          Invoke-WebRequest -Uri $url -OutFile $target -UseBasicParsing -TimeoutSec 3600
-          if ((Get-Item $target).Length -gt 0) { $ok = $true; break }
-        } catch {
-          $errors += "$url -> $($_.Exception.Message)"
+
+      # ① 先找本地已下载好的内核包（离线/内网/之前下过一半也算）：
+      #    找到且 sha256 对得上就直接用，完全不联网。
+      $local = Find-LocalPackage $payload
+      if ($local) {
+        $target = $local
+        $ok = $true
+        Write-Log "使用本地安装包 $target"
+      }
+
+      # ② 本地没有才联网下载。注意：临时文件名必须每次唯一，
+      #    否则上次失败残留的文件被别的进程占用时会永远报"正由另一进程使用"。
+      if (-not $ok) {
+        $target = Join-Path $env:TEMP ("wandao-" + $payload.version + "-" + [guid]::NewGuid().ToString('N') + ".7z")
+        # 顺手清掉旧的固定名残留，避免占用/占空间
+        Get-ChildItem -Path $env:TEMP -Filter ("wandao-" + $payload.version + "*.7z") -ErrorAction SilentlyContinue |
+          ForEach-Object { try { Remove-Item $_.FullName -Force -ErrorAction Stop } catch { } }
+        Write-Log "downloading $($payload.version) -> $target"
+        foreach ($url in @($payload.mirrors)) {
+          foreach ($attempt in 1..2) {
+            try {
+              Write-Log "GET $url (try $attempt)"
+              if (Test-Path $target) { Remove-Item $target -Force -ErrorAction SilentlyContinue }
+              Invoke-WebRequest -Uri $url -OutFile $target -UseBasicParsing -TimeoutSec 3600
+              if ((Get-Item $target).Length -gt 0) { $ok = $true; break }
+            } catch {
+              $errors += "$url -> $($_.Exception.Message)"
+            }
+          }
+          if ($ok) { break }
+        }
+        if (-not $ok) {
+          try { if (Test-Path $target) { Remove-Item $target -Force -ErrorAction SilentlyContinue } } catch { }
+          Emit $name $false ("全部下载源失败（可把内核 7z 放到下载目录或 D:\\WandaoHermes_share_build 再重试）: " + ($errors -join ' | '))
+          return 1
         }
       }
-      if (-not $ok) { Emit $name $false ("全部下载源失败: " + ($errors -join ' | ')); return 1 }
       $sizeMb = [math]::Round((Get-Item $target).Length / 1MB, 1)
       if ($payload.sha256) {
         $actual = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLower()
@@ -162,9 +219,36 @@ function Invoke-Stage([string]$name) {
       Write-Log "move $srcRoot\* -> $InstallDir"
       Copy-Item -Path (Join-Path $srcRoot '*') -Destination $InstallDir -Recurse -Force
       Remove-Item -Path $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
-      if (-not (Test-Path (Join-Path $InstallDir 'start-wandao.bat'))) {
-        Emit $name $false "解压后未找到 $InstallDir\start-wandao.bat"
+      # 启动器位置可能不同：根目录 start-wandao.bat / kernel\start.bat / shell\app\start-wandao-gui.bat
+      $launchers = @(
+        (Join-Path $InstallDir 'start-wandao.bat'),
+        (Join-Path $InstallDir 'kernel\start.bat'),
+        (Join-Path $InstallDir 'shell\app\start-wandao-gui.bat')
+      )
+      $found = $launchers | Where-Object { Test-Path $_ } | Select-Object -First 1
+      if (-not $found) {
+        Emit $name $false ("解压后没找到启动脚本（查过: " + ($launchers -join ', ') + "）")
         return 1
+      }
+      Write-Log "launcher: $found"
+      # 根目录没有 start-wandao.bat 时，补一个转发脚本，方便双击启动
+      $rootBat = Join-Path $InstallDir 'start-wandao.bat'
+      if (-not (Test-Path $rootBat)) {
+        $kbat = Join-Path $InstallDir 'kernel\start.bat'
+        if (Test-Path $kbat) {
+          $batLines = @(
+            '@echo off',
+            'setlocal',
+            'set "ROOT=%~dp0"',
+            'if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"',
+            'set "WANDAO_ROOT=%ROOT%"',
+            'set "WANDAO_HOME=%ROOT%\data\_wandao"',
+            'set "WANDAO_GW=http://127.0.0.1:42200"',
+            'set "WANDAO_SINGLE_SESSION=1"',
+            'call "%ROOT%\kernel\start.bat" %*'
+          )
+          try { Set-Content -Path $rootBat -Value ($batLines -join "`r`n") -Encoding ASCII -Force } catch { }
+        }
       }
       Emit $name $true "$InstallDir 已就绪"
       return 0
