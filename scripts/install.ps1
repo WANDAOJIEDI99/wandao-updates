@@ -112,8 +112,14 @@ function Get-SevenZip {
   if ($onPath) { return $onPath.Source }
   # fall back to the standalone console build shipped in our repo
   $sevenZr = Join-Path $env:TEMP 'wandao-7zr.exe'
-  if (-not (Test-Path $sevenZr)) { Get-RemoteFile 'scripts/7zr.exe' $sevenZr | Out-Null }
-  return $sevenZr
+  if (-not (Test-Path $sevenZr)) {
+    try { Get-RemoteFile 'scripts/7zr.exe' $sevenZr | Out-Null } catch { Write-Log "7zr 下载失败: $($_.Exception.Message)" }
+  }
+  if (Test-Path $sevenZr) { return $sevenZr }
+  # 再兜底：Windows 10/11 自带的 tar.exe（libarchive，能解 7z）
+  $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+  if (Test-Path $tar) { Write-Log "使用系统 tar.exe 解压"; return $null }
+  return $null
 }
 
 $Stages = @(
@@ -210,8 +216,15 @@ function Invoke-Stage([string]$name) {
       $tmpDir = Join-Path $env:TEMP ("wandao-x-" + [guid]::NewGuid().ToString('N'))
       New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
       Write-Log "extract $pkg -> $tmpDir"
-      & $sevenZip x $pkg "-o$tmpDir" -y -bsp0 -bso0 | Out-Null
-      if ($LASTEXITCODE -ne 0) { Emit $name $false "7z 退出码 $LASTEXITCODE"; return 1 }
+      if ($sevenZip) {
+        & $sevenZip x $pkg "-o$tmpDir" -y -bsp0 -bso0 | Out-Null
+        if ($LASTEXITCODE -ne 0) { Emit $name $false "7z 退出码 $LASTEXITCODE"; return 1 }
+      } else {
+        $tarExe = Join-Path $env:SystemRoot 'System32\tar.exe'
+        if (-not (Test-Path $tarExe)) { Emit $name $false "既没有 7-Zip 也没有系统 tar.exe，无法解压"; return 1 }
+        & $tarExe -xf $pkg -C $tmpDir 2>$null
+        if ($LASTEXITCODE -ne 0) { Emit $name $false "tar 解压失败，退出码 $LASTEXITCODE"; return 1 }
+      }
       $srcRoot = $tmpDir
       $wrapped = Join-Path $tmpDir 'WandaoHermes'
       if (Test-Path (Join-Path $wrapped 'start-wandao.bat')) { $srcRoot = $wrapped }
