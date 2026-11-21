@@ -194,6 +194,14 @@ function Invoke-Stage([string]$name) {
       $sizeMb = [math]::Round((Get-Item $target).Length / 1MB, 1)
       # 关键：把解析到的包路径落盘，extract 阶段（可能是另一个进程）靠它找包
       try { Set-Content -Path (Join-Path $env:TEMP 'wandao-pkg-path.txt') -Value $target -Encoding UTF8 } catch { }
+      # 兼容老版本 extract（它只会找 %TEMP%\wandao-<版本>.7z）：顺手留一份固定名
+      try {
+        $fixed = Join-Path $env:TEMP ("wandao-" + $payload.version + ".7z")
+        if ($target -ne $fixed -and -not (Test-Path $fixed)) {
+          Copy-Item -Path $target -Destination $fixed -Force -ErrorAction Stop
+          Write-Log "compat copy -> $fixed"
+        }
+      } catch { Write-Log "compat copy 跳过: $($_.Exception.Message)" }
       if ($payload.sha256) {
         $actual = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLower()
         if ($actual -ne $payload.sha256.ToLower()) {
